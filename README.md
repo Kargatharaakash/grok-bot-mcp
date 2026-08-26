@@ -13,7 +13,7 @@ Create bots, read transcripts, send messages, search history, and check usage �
 [![deps](https://img.shields.io/badge/dependencies-0-orange)](https://www.npmjs.com/package/grok-bot-mcp)
 [![mcp](https://img.shields.io/badge/MCP-compatible-purple)](https://modelcontextprotocol.io)
 
-**Companion to:** [gbu — Grok Bot Usage checker](https://github.com/Kargatharaaakash/gbu)
+**Companion to:** [gbu — Grok Bot Usage checker](https://github.com/Kargatharaakash/gbu)
 
 </div>
 
@@ -37,7 +37,7 @@ All through the standardized MCP tool interface. No custom API integration neede
 **One command (macOS / Linux):**
 
 ```sh
-gh repo clone Kargatharaaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
+gh repo clone Kargatharaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
 ```
 
 The install script automatically detects which AI agents you have installed and configures the MCP server for each one. Restart your AI agent after install.
@@ -109,7 +109,7 @@ AI Agent (Claude / Cursor / Copilot / Windsurf / etc.)
                                    └── GetSandUsageStatus, GetCurrentPeriodUsage
 ```
 
-The server discovers the Grok Bot gateway by decrypting `gateway-descriptor.json` (same macOS Keychain technique as [gbu](https://github.com/Kargatharaaakash/gbu)). For database queries, it reads the local SQLite files directly in read-only mode.
+The server discovers the Grok Bot gateway by decrypting `gateway-descriptor.json` (same macOS Keychain technique as [gbu](https://github.com/Kargatharaakash/gbu)). For database queries, it reads the local SQLite files directly in read-only mode.
 
 ## Manual config
 
@@ -158,7 +158,7 @@ Then remove the `grok-bot` entry from your AI agent's MCP config file.
 
 ## Companion project
 
-**[gbu](https://github.com/Kargatharaaakash/gbu)** — Grok Bot Usage checker CLI. Multi-account usage checking from the terminal. Same token management, same API, different interface (CLI vs MCP).
+**[gbu](https://github.com/Kargatharaakash/gbu)** — Grok Bot Usage checker CLI. Multi-account usage checking from the terminal. Same token management, same API, different interface (CLI vs MCP).
 
 ## License
 

@@ -1,13 +1,13 @@
 #!/bin/sh
 # grok-bot-mcp install script
 # Installs the MCP server and configures it for top AI agents.
-# Usage: gh repo clone Kargatharaaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
+# Usage: gh repo clone Kargatharaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
 
 set -e
 
 NAME="grok-bot-mcp"
 DIR="$HOME/.gbm/bin"
-REPO="Kargatharaaakash/grok-bot-mcp"
+REPO="Kargatharaakash/grok-bot-mcp"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 mkdir -p "$DIR"
