@@ -98,7 +98,8 @@ AI Agent (Claude / Cursor / Copilot / Windsurf / etc.)
         ▼
    grok-bot-mcp server
         │
-        ├── Grok Bot Gateway ──► http://127.0.0.1:<port>/api/<command>
+        ├── Grok Bot Gateway ──► http://127.0.0.1:<port>/api/<command> (legacy)
+        │                     or https://<pod>.cursorvm.com/api/<command> (Grok Bot 0.30+)
         │                          ├── listAgents, createAgent, sendPrompt...
         │                          └── 100+ gateway commands
         │
@@ -109,7 +110,7 @@ AI Agent (Claude / Cursor / Copilot / Windsurf / etc.)
                                    └── GetSandUsageStatus, GetCurrentPeriodUsage
 ```
 
-The server discovers the Grok Bot gateway by decrypting `gateway-descriptor.json` (same macOS Keychain technique as [gbu](https://github.com/Kargatharaakash/grok-bot-usage)). For database queries, it reads the local SQLite files directly in read-only mode.
+The server discovers the Grok Bot gateway by decrypting `gateway-descriptor.json` (same macOS Keychain technique as [gbu](https://github.com/Kargatharaakash/grok-bot-usage)). Supports both legacy local gateways (`host` + `port`) and cloud gateways (`baseUrl` + `token`) used by Grok Bot 0.30+. For database queries, it reads the local SQLite files directly in read-only mode.
 
 ## Manual config
 
@@ -146,7 +147,7 @@ node --test tests/*.test.mjs
 - **No secrets in MCP responses** — tokens are never returned to the AI agent
 - **Gateway token decrypted at startup** — never written to disk
 - **Local only** — stdio transport, no network server exposed
-- **No telemetry** — zero calls except to `127.0.0.1` (gateway) and `api2.cursor.sh` (usage)
+- **No telemetry** — zero calls except to the Grok Bot gateway (local or cloud) and `api2.cursor.sh` (usage)
 
 ## Uninstall
 

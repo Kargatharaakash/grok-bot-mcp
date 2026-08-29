@@ -26,8 +26,8 @@ No build step. No compile step.
 server.mjs
   ├── crypto helpers (checksum, obfuscate, machineId)
   ├── token acquisition (getTokenFromGrokBot, getTokenFromGbu)
-  ├── gateway discovery (discoverGateway — decrypts gateway-descriptor.json)
-  ├── API calls (callDashboard → ConnectRPC, callGateway → local HTTP)
+  ├── gateway discovery (discoverGateway — decrypts gateway-descriptor.json; supports local host:port and cloud baseUrl)
+  ├── API calls (callDashboard → ConnectRPC, callGateway → local or cloud HTTP)
   ├── SQLite reader (readAgentDb, listAgentDbs — read-only)
   ├── MCP tool definitions (TOOLS array — 10 tools)
   ├── tool handlers (handleTool — switch on tool name)
@@ -54,7 +54,7 @@ server.mjs
 - Tests in `tests/` use mocks only
 - No real Grok Bot calls, no network, no database writes
 - `tests/server.test.mjs` — MCP protocol tests (initialize, tools/list, error handling)
-- `tests/mock-gateway.test.mjs` — mock data tests (agents, transcripts, usage, search)
+- `tests/gateway.test.mjs` — gateway descriptor parsing (local + cloud formats)
 
 ## Security rules
 
@@ -72,4 +72,4 @@ server.mjs
 - **Never do:** Hardcode tokens, API keys, or credentials
 - **Never do:** Add write access to SQLite databases
 - **Never do:** Expose the gateway token or auth token through MCP tools
-- **Never do:** Make network calls except to `127.0.0.1` (gateway) and `api2.cursor.sh` (usage)
+- **Never do:** Make network calls except to the Grok Bot gateway (local or cloud) and `api2.cursor.sh` (usage)

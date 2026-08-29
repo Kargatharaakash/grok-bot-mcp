@@ -152,6 +152,14 @@ else
   SKIPPED="$SKIPPED  Zed (not installed)"
 fi
 
+# 9. Antigravity
+ANTIGRAVITY_CONFIG="$HOME/.gemini/config/mcp_config.json"
+if [ -d "$HOME/.gemini" ] || [ -f "$ANTIGRAVITY_CONFIG" ]; then
+  add_to_config "$ANTIGRAVITY_CONFIG" "Antigravity"
+else
+  SKIPPED="$SKIPPED  Antigravity (not installed)"
+fi
+
 echo ""
 echo "  ┌─────────────────────────────────────────────────┐"
 echo "  │  grok-bot-mcp installed                         │"

@@ -9,7 +9,11 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
+
+const SERVER_VERSION = "1.1.0";
+const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 const BACKEND = "https://api2.cursor.sh";
 const CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
@@ -82,21 +86,53 @@ async function callDashboard(method, token) {
   return r.json();
 }
 
-// ── Local gateway discovery ──────────────────────────────────────────────
+// ── Gateway discovery (local host:port or cloud baseUrl) ─────────────────
+export function parseGatewayDescriptor(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+
+  // Legacy local gateway (Grok Bot <0.30)
+  if (parsed.host && parsed.port) {
+    return {
+      baseUrl: `http://${parsed.host}:${parsed.port}`,
+      token: parsed.authToken || parsed.token || "",
+      headers: parsed.headers || {},
+    };
+  }
+
+  // Cloud / remote gateway (Grok Bot 0.30+)
+  if (parsed.baseUrl && parsed.token) {
+    return {
+      baseUrl: String(parsed.baseUrl).replace(/\/$/, ""),
+      token: parsed.token,
+      headers: parsed.headers || {},
+    };
+  }
+
+  return null;
+}
+
+export function buildGatewayRequest(gw, command) {
+  const headers = { "Content-Type": "application/json", ...gw.headers };
+  if (gw.token) headers.Authorization = `Bearer ${gw.token}`;
+  return {
+    url: `${gw.baseUrl}/api/${command}`,
+    headers,
+  };
+}
+
 function discoverGateway() {
   const descPath = join(GROKBOT_DATA, "gateway-descriptor.json");
   if (!existsSync(descPath)) return null;
   try {
     const d = JSON.parse(readFileSync(descPath, "utf8"));
     const entries = d.entries || {};
-    for (const [scope, entry] of Object.entries(entries)) {
-      if (entry.encrypted) {
-        try {
-          const decrypted = decryptSafeStorage(entry.encrypted);
-          const parsed = JSON.parse(decrypted);
-          if (parsed.port && parsed.host) return parsed;
-        } catch {}
-      }
+    for (const entry of Object.values(entries)) {
+      if (!entry?.encrypted) continue;
+      try {
+        const decrypted = decryptSafeStorage(entry.encrypted);
+        const parsed = parseGatewayDescriptor(JSON.parse(decrypted));
+        if (parsed) return parsed;
+      } catch {}
     }
   } catch {}
   return null;
@@ -105,9 +141,7 @@ function discoverGateway() {
 async function callGateway(command, body = {}, gateway = null) {
   const gw = gateway || discoverGateway();
   if (!gw) throw new Error("Grok Bot gateway not found. Is Grok Bot running?");
-  const url = `http://${gw.host}:${gw.port}/api/${command}`;
-  const headers = {"Content-Type": "application/json"};
-  if (gw.authToken) headers["Authorization"] = `Bearer ${gw.authToken}`;
+  const { url, headers } = buildGatewayRequest(gw, command);
   const r = await fetch(url, {method: "POST", headers, body: JSON.stringify(body)});
   if (!r.ok) { const t = await r.text().catch(()=>""); throw new Error(`${command}: ${r.status} ${t}`); }
   return r.json();
@@ -372,44 +406,48 @@ function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
 
-const rl = createInterface({ input: process.stdin, terminal: false });
+function startMcpServer() {
+  const rl = createInterface({ input: process.stdin, terminal: false });
 
-rl.on("line", (line) => {
-  let req;
-  try { req = JSON.parse(line); } catch { return; }
-  if (!req.id || !req.method) return;
+  rl.on("line", (line) => {
+    let req;
+    try { req = JSON.parse(line); } catch { return; }
+    if (!req.id || !req.method) return;
 
-  const { id, method, params } = req;
+    const { id, method, params } = req;
 
-  switch (method) {
-    case "initialize":
-      send({ jsonrpc: "2.0", id, result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "grok-bot-mcp", version: "1.0.0" }
-      }});
-      break;
+    switch (method) {
+      case "initialize":
+        send({ jsonrpc: "2.0", id, result: {
+          protocolVersion: "2024-11-05",
+          capabilities: { tools: {} },
+          serverInfo: { name: "grok-bot-mcp", version: SERVER_VERSION }
+        }});
+        break;
 
-    case "initialized":
-      // notification, no response needed
-      break;
+      case "initialized":
+        // notification, no response needed
+        break;
 
-    case "tools/list":
-      send({ jsonrpc: "2.0", id, result: { tools: TOOLS } });
-      break;
+      case "tools/list":
+        send({ jsonrpc: "2.0", id, result: { tools: TOOLS } });
+        break;
 
-    case "tools/call":
-      handleTool(params.name, params.arguments || {})
-        .then(result => send({ jsonrpc: "2.0", id, result }))
-        .catch(err => send({ jsonrpc: "2.0", id, error: { code: -32603, message: err.message } }));
-      break;
+      case "tools/call":
+        handleTool(params.name, params.arguments || {})
+          .then(result => send({ jsonrpc: "2.0", id, result }))
+          .catch(err => send({ jsonrpc: "2.0", id, error: { code: -32603, message: err.message } }));
+        break;
 
-    default:
-      send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
-  }
-});
+      default:
+        send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+    }
+  });
 
-rl.on("close", () => process.exit(0));
+  rl.on("close", () => process.exit(0));
+  process.stdin.resume();
+}
 
-// Keep alive
-process.stdin.resume();
+if (isMainModule) {
+  startMcpServer();
+}
