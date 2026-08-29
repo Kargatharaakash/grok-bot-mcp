@@ -42,6 +42,14 @@ gh repo clone Kargatharaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
 
 The install script automatically detects which AI agents you have installed and configures the MCP server for each one. Restart your AI agent after install.
 
+**One-time setup (after install):**
+
+```sh
+node ~/.gbm/bin/grok-bot-mcp setup
+```
+
+This reads Grok Bot credentials once (may prompt Keychain) and saves them to `~/.gbm/config.json`. After that, MCP tools never touch Keychain again. Re-run setup if Grok Bot reconnects or tokens expire.
+
 **What it configures:**
 
 | Agent | Config path | Auto-configured |
@@ -130,8 +138,8 @@ If you prefer to configure manually, add this to your MCP config file:
 ## Requirements
 
 - Node.js 18+
-- Grok Bot app installed and running (for gateway and keychain access)
-- macOS (for gateway discovery and keychain decryption; database reads work on any OS if files exist)
+- Grok Bot app installed and running
+- One-time `grok-bot-mcp setup` (macOS Keychain prompt happens once, then cached to `~/.gbm/config.json`)
 
 ## Testing
 
@@ -145,7 +153,7 @@ node --test tests/*.test.mjs
 
 - **Read-only database access** — `PRAGMA query_only = 1` on all SQLite queries
 - **No secrets in MCP responses** — tokens are never returned to the AI agent
-- **Gateway token decrypted at startup** — never written to disk
+- **Credentials cached locally** — `~/.gbm/config.json` (mode 600); Keychain only used during `setup`
 - **Local only** — stdio transport, no network server exposed
 - **No telemetry** — zero calls except to the Grok Bot gateway (local or cloud) and `api2.cursor.sh` (usage)
 

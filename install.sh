@@ -33,6 +33,15 @@ fi
 
 chmod +x "$DIR/grok-bot-mcp"
 
+# One-time credential bootstrap (Keychain prompt happens here only)
+echo ""
+echo "  Running one-time setup (may prompt for Keychain access)..."
+if node "$DIR/grok-bot-mcp" setup 2>/dev/null; then
+  echo "  Credentials cached at ~/.gbm/config.json"
+else
+  echo "  Setup skipped — run manually later: node $DIR/grok-bot-mcp setup"
+fi
+
 # Add to PATH
 case ":$PATH:" in
   *":$DIR:"*) ;;

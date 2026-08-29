@@ -3,7 +3,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseGatewayDescriptor, buildGatewayRequest } from "../server.mjs";
+import { parseGatewayDescriptor, buildGatewayRequest, loadGatewayFromEnv } from "../server.mjs";
 
 describe("parseGatewayDescriptor", () => {
   test("parses legacy local host:port gateway", () => {
@@ -60,5 +60,25 @@ describe("buildGatewayRequest", () => {
     assert.equal(req.url, "https://example.cursorvm.com/api/listAgents");
     assert.equal(req.headers.Authorization, "Bearer cloud-token");
     assert.equal(req.headers["x-anyrun-network-token"], "nto-abc");
+  });
+});
+
+describe("loadGatewayFromEnv", () => {
+  test("loads gateway from environment variables", () => {
+    const gw = loadGatewayFromEnv({
+      GROKBOT_GATEWAY_URL: "https://example.cursorvm.com",
+      GROKBOT_GATEWAY_TOKEN: "cloud-token",
+      GROKBOT_GATEWAY_HEADERS: '{"x-anyrun-network-token":"nto-abc"}',
+    });
+    assert.deepEqual(gw, {
+      baseUrl: "https://example.cursorvm.com",
+      token: "cloud-token",
+      headers: { "x-anyrun-network-token": "nto-abc" },
+    });
+  });
+
+  test("returns null when env vars are missing", () => {
+    assert.equal(loadGatewayFromEnv({}), null);
+    assert.equal(loadGatewayFromEnv({ GROKBOT_GATEWAY_URL: "https://x.com" }), null);
   });
 });

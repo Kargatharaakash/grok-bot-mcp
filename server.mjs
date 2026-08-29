@@ -12,11 +12,13 @@ import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 
-const SERVER_VERSION = "1.1.0";
+const SERVER_VERSION = "1.2.0";
 const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 const BACKEND = "https://api2.cursor.sh";
 const CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
+const GBM_DIR = join(homedir(), ".gbm");
+const GBM_CONFIG = join(GBM_DIR, "config.json");
 const GROKBOT_DATA = join(homedir(), "Library", "Application Support", "Grok Bot");
 const GROKBOT_SECRETS = join(GROKBOT_DATA, "sand-secrets.json");
 const GROKBOT_AGENTS_DIR = join(homedir(), ".grokbot");
@@ -33,6 +35,13 @@ function checksum(mid, now=Date.now()) {
 function machineId() { return randomUUID(); }
 
 // ── token acquisition ────────────────────────────────────────────────────
+function extractJwt(value) {
+  const m = String(value).match(/^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+  if (!m) throw new Error("Invalid access token");
+  return m[0];
+}
+
+// Keychain access is only used by the one-time `setup` command — never during MCP tool calls.
 function decryptSafeStorage(encBase64) {
   const kp = execSync('security find-generic-password -a "Grok Bot Key" -s "Grok Bot Safe Storage" -w', {encoding:"utf8",timeout:3e4,maxBuffer:1e4}).trim();
   const raw = Buffer.from(encBase64, "base64");
@@ -45,6 +54,49 @@ function decryptSafeStorage(encBase64) {
   return buf.toString("utf8");
 }
 
+export function readGbmConfig() {
+  if (!existsSync(GBM_CONFIG)) return null;
+  try { return JSON.parse(readFileSync(GBM_CONFIG, "utf8")); } catch { return null; }
+}
+
+export function writeGbmConfig(config) {
+  mkdirSync(GBM_DIR, { recursive: true });
+  writeFileSync(GBM_CONFIG, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+}
+
+export function loadGatewayFromEnv(env = process.env) {
+  const baseUrl = env.GROKBOT_GATEWAY_URL?.trim();
+  const token = env.GROKBOT_GATEWAY_TOKEN?.trim();
+  if (!baseUrl || !token) return null;
+  let headers = {};
+  if (env.GROKBOT_GATEWAY_HEADERS) {
+    try {
+      const parsed = JSON.parse(env.GROKBOT_GATEWAY_HEADERS);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) headers = parsed;
+    } catch {}
+  }
+  return parseGatewayDescriptor({ baseUrl, token, headers });
+}
+
+function loadGatewayFromConfig(config = readGbmConfig()) {
+  if (!config?.gateway) return null;
+  return parseGatewayDescriptor(config.gateway);
+}
+
+function decryptGatewayFromKeychain() {
+  const descPath = join(GROKBOT_DATA, "gateway-descriptor.json");
+  if (!existsSync(descPath)) throw new Error("Grok Bot gateway-descriptor.json not found. Is Grok Bot installed?");
+  const d = JSON.parse(readFileSync(descPath, "utf8"));
+  const entries = d.entries || {};
+  for (const entry of Object.values(entries)) {
+    if (!entry?.encrypted) continue;
+    const decrypted = decryptSafeStorage(entry.encrypted);
+    const parsed = parseGatewayDescriptor(JSON.parse(decrypted));
+    if (parsed) return parsed;
+  }
+  throw new Error("Could not decrypt Grok Bot gateway. Is Grok Bot running?");
+}
+
 function getTokenFromGrokBot() {
   if (process.platform !== "darwin") throw new Error("Grok Bot import requires macOS");
   if (!existsSync(GROKBOT_SECRETS)) throw new Error("Grok Bot not installed");
@@ -53,10 +105,7 @@ function getTokenFromGrokBot() {
   const sc = acc.active;
   const enc = acc.accounts?.[sc]?.["cursor-access-token"];
   if (!enc) throw new Error("No token in Grok Bot");
-  const t = decryptSafeStorage(enc);
-  const m = t.match(/^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
-  if (!m) throw new Error("Decrypted data is not a JWT");
-  return m[0];
+  return extractJwt(decryptSafeStorage(enc));
 }
 
 function getTokenFromGbu() {
@@ -64,14 +113,39 @@ function getTokenFromGbu() {
   const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
   const first = Object.values(s)[0];
   if (!first?.accessToken) throw new Error("No token in gbu accounts");
-  return first.accessToken;
+  return extractJwt(first.accessToken);
 }
 
 function getToken() {
-  // Try gbu first (multi-account), then Grok Bot app
+  const envToken = process.env.GROKBOT_ACCESS_TOKEN?.trim();
+  if (envToken) return extractJwt(envToken);
+
+  const config = readGbmConfig();
+  if (config?.accessToken) return extractJwt(config.accessToken);
+
   try { return getTokenFromGbu(); } catch {}
-  try { return getTokenFromGrokBot(); } catch {}
-  throw new Error("No token found. Install gbu (gbu add) or Grok Bot app.");
+  throw new Error("No access token configured. Run: grok-bot-mcp setup");
+}
+
+async function runSetup() {
+  const gateway = decryptGatewayFromKeychain();
+  let accessToken;
+  try { accessToken = getTokenFromGrokBot(); } catch {}
+
+  writeGbmConfig({
+    version: 1,
+    savedAt: new Date().toISOString(),
+    gateway: {
+      baseUrl: gateway.baseUrl,
+      token: gateway.token,
+      headers: gateway.headers,
+    },
+    ...(accessToken ? { accessToken } : {}),
+  });
+
+  console.log(`Saved Grok Bot credentials to ${GBM_CONFIG}`);
+  console.log("MCP tools will use this file — no more Keychain prompts.");
+  console.log("Re-run setup if Grok Bot reconnects or tokens expire.");
 }
 
 // ── ConnectRPC calls (Cursor backend) ────────────────────────────────────
@@ -120,27 +194,30 @@ export function buildGatewayRequest(gw, command) {
   };
 }
 
+const GATEWAY_SETUP_HINT = "Run once: grok-bot-mcp setup  (or set GROKBOT_GATEWAY_URL + GROKBOT_GATEWAY_TOKEN)";
+let cachedGateway = null;
+
 function discoverGateway() {
-  const descPath = join(GROKBOT_DATA, "gateway-descriptor.json");
-  if (!existsSync(descPath)) return null;
-  try {
-    const d = JSON.parse(readFileSync(descPath, "utf8"));
-    const entries = d.entries || {};
-    for (const entry of Object.values(entries)) {
-      if (!entry?.encrypted) continue;
-      try {
-        const decrypted = decryptSafeStorage(entry.encrypted);
-        const parsed = parseGatewayDescriptor(JSON.parse(decrypted));
-        if (parsed) return parsed;
-      } catch {}
-    }
-  } catch {}
+  if (cachedGateway) return cachedGateway;
+
+  const fromEnv = loadGatewayFromEnv();
+  if (fromEnv) {
+    cachedGateway = fromEnv;
+    return fromEnv;
+  }
+
+  const fromConfig = loadGatewayFromConfig();
+  if (fromConfig) {
+    cachedGateway = fromConfig;
+    return fromConfig;
+  }
+
   return null;
 }
 
 async function callGateway(command, body = {}, gateway = null) {
   const gw = gateway || discoverGateway();
-  if (!gw) throw new Error("Grok Bot gateway not found. Is Grok Bot running?");
+  if (!gw) throw new Error(`Grok Bot gateway not configured. ${GATEWAY_SETUP_HINT}`);
   const { url, headers } = buildGatewayRequest(gw, command);
   const r = await fetch(url, {method: "POST", headers, body: JSON.stringify(body)});
   if (!r.ok) { const t = await r.text().catch(()=>""); throw new Error(`${command}: ${r.status} ${t}`); }
@@ -449,5 +526,12 @@ function startMcpServer() {
 }
 
 if (isMainModule) {
-  startMcpServer();
+  const cmd = process.argv[2];
+  if (cmd === "setup") {
+    runSetup()
+      .then(() => process.exit(0))
+      .catch((err) => { console.error(err.message); process.exit(1); });
+  } else {
+    startMcpServer();
+  }
 }

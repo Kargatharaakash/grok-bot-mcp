@@ -26,7 +26,8 @@ No build step. No compile step.
 server.mjs
   ├── crypto helpers (checksum, obfuscate, machineId)
   ├── token acquisition (getTokenFromGrokBot, getTokenFromGbu)
-  ├── gateway discovery (discoverGateway — decrypts gateway-descriptor.json; supports local host:port and cloud baseUrl)
+  ├── gateway discovery (env vars → ~/.gbm/config.json — no Keychain on tool calls)
+  ├── setup command (one-time Keychain decrypt → writes ~/.gbm/config.json)
   ├── API calls (callDashboard → ConnectRPC, callGateway → local or cloud HTTP)
   ├── SQLite reader (readAgentDb, listAgentDbs — read-only)
   ├── MCP tool definitions (TOOLS array — 10 tools)
@@ -60,7 +61,7 @@ server.mjs
 
 - Never return tokens, secrets, or credentials in MCP tool responses
 - Database access is always read-only (`PRAGMA query_only = 1`)
-- Gateway token is decrypted at startup, never persisted
+- Gateway token is decrypted during `setup` only, then cached in `~/.gbm/config.json` (mode 600)
 - No telemetry, no analytics, no third-party network calls
 - The `CLIENT_ID` is a public OAuth client ID, not a secret
 
