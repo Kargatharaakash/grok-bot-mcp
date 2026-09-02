@@ -47,6 +47,23 @@ describe("grok-bot-mcp server", () => {
       assert.ok(response.result.capabilities.tools);
     });
 
+    test("initialize with id 0 returns a response", async () => {
+      // Regression: clients that number requests from 0 (Claude Code does)
+      // were dropped by a falsy `!req.id` guard, hanging the handshake.
+      const response = await sendMcpRequest({
+        jsonrpc: "2.0", id: 0, method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test" } }
+      });
+      assert.equal(response.id, 0);
+      assert.equal(response.result.serverInfo.name, "grok-bot-mcp");
+    });
+
+    test("tools/list with id 0 returns a response", async () => {
+      const response = await sendMcpRequest({ jsonrpc: "2.0", id: 0, method: "tools/list", params: {} });
+      assert.equal(response.id, 0);
+      assert.ok(Array.isArray(response.result.tools));
+    });
+
     test("tools/list returns all 10 tools", async () => {
       const response = await sendMcpRequest({
         jsonrpc: "2.0", id: 2, method: "tools/list", params: {}

@@ -377,7 +377,9 @@ const rl = createInterface({ input: process.stdin, terminal: false });
 rl.on("line", (line) => {
   let req;
   try { req = JSON.parse(line); } catch { return; }
-  if (!req.id || !req.method) return;
+  if (typeof req.method !== "string") return;
+  // JSON-RPC ids may legitimately be 0; notifications carry no id and take no response.
+  if (req.id === undefined || req.id === null) return;
 
   const { id, method, params } = req;
 
