@@ -773,8 +773,11 @@ async function handleTool(name, args) {
       const s = loadStore();
       const names = getAccountNames(s);
       if (names.length === 0) throw new Error("No accounts found. Run: grok-bot login");
-      const match = names.find(n => n.toLowerCase() === args.account.toLowerCase()) ||
-                    names.find(n => n.toLowerCase().startsWith(args.account.toLowerCase()));
+      let match = names.find(n => n.toLowerCase() === args.account.toLowerCase()) ||
+                  names.find(n => n.toLowerCase().startsWith(args.account.toLowerCase()));
+      if (!match && args.account.toLowerCase() === "personal") {
+        match = names.find(n => n.toLowerCase() === "main");
+      }
       if (!match) throw new Error(`Account "${args.account}" not found. Available: ${names.join(", ")}`);
 
       s._active = match;
@@ -1009,8 +1012,11 @@ export async function cmdSwitch(targetName) {
     return;
   }
 
-  const match = names.find(n => n.toLowerCase() === targetName.toLowerCase()) ||
-                names.find(n => n.toLowerCase().startsWith(targetName.toLowerCase()));
+  let match = names.find(n => n.toLowerCase() === targetName.toLowerCase()) ||
+              names.find(n => n.toLowerCase().startsWith(targetName.toLowerCase()));
+  if (!match && targetName.toLowerCase() === "personal") {
+    match = names.find(n => n.toLowerCase() === "main");
+  }
   if (!match) {
     console.error(`\n  \x1b[31mError:\x1b[0m Account "${targetName}" not found. Available: ${names.join(", ")}\n`);
     process.exit(1);
