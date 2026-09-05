@@ -1,10 +1,12 @@
 {
   "name": "grok-bot-mcp",
-  "version": "1.2.0",
-  "description": "MCP server for Grok Bot — lets any AI agent control Grok Bot: create bots, read transcripts, send messages, manage channels, search history, check usage",
+  "version": "1.3.0",
+  "description": "Unified CLI & MCP server for Grok Bot — check usage, switch accounts, and let AI agents control Grok Bot",
   "type": "module",
   "bin": {
-    "grok-bot-mcp": "server.mjs"
+    "grok-bot-mcp": "server.mjs",
+    "grok-bot": "server.mjs",
+    "gbm": "server.mjs"
   },
   "scripts": {
     "start": "node server.mjs",

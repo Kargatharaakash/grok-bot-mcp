@@ -1,48 +1,47 @@
 #!/bin/sh
-# grok-bot-mcp install script
-# Installs the MCP server and configures it for top AI agents.
-# Usage: gh repo clone Kargatharaakash/grok-bot-mcp && cd grok-bot-mcp && sh install.sh
+# grok-bot install script — Unified CLI & MCP Setup
+# Works on macOS, Linux, and Windows (Git Bash / WSL)
+# Usage: curl -fsSL https://raw.githubusercontent.com/Kargatharaakash/grok-bot-mcp/main/install.sh | sh
 
 set -e
 
-NAME="grok-bot-mcp"
+NAME="grok-bot"
 DIR="$HOME/.gbm/bin"
 REPO="Kargatharaakash/grok-bot-mcp"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 mkdir -p "$DIR"
 
-# Download server
-download() {
-  local file="$1" dest="$2"
-  if curl -fsSL "${RAW_BASE}/${file}" -o "$dest" 2>/dev/null; then
-    return 0
-  fi
-  if command -v gh >/dev/null 2>&1; then
-    gh api "repos/${REPO}/contents/${file}" --jq '.content' 2>/dev/null | base64 -d > "$dest" 2>/dev/null
-    return $?
-  fi
-  return 1
-}
+# Download or copy server
+if [ -f "server.mjs" ]; then
+  cp server.mjs "$DIR/grok-bot-mcp"
+else
+  download() {
+    local file="$1" dest="$2"
+    if curl -fsSL "${RAW_BASE}/${file}" -o "$dest" 2>/dev/null; then
+      return 0
+    fi
+    if command -v gh >/dev/null 2>&1; then
+      gh api "repos/${REPO}/contents/${file}" --jq '.content' 2>/dev/null | base64 -d > "$dest" 2>/dev/null
+      return $?
+    fi
+    return 1
+  }
 
-if ! download "server.mjs" "$DIR/grok-bot-mcp"; then
-  echo "  Could not download server.mjs"
-  echo "  If private repo: gh repo clone ${REPO} && cd grok-bot-mcp && sh install.sh"
-  exit 1
+  if ! download "server.mjs" "$DIR/grok-bot-mcp"; then
+    echo "  Could not download server.mjs"
+    echo "  Run: gh repo clone ${REPO} && cd grok-bot-mcp && sh install.sh"
+    exit 1
+  fi
 fi
 
 chmod +x "$DIR/grok-bot-mcp"
 
-# One-time credential bootstrap (Keychain prompt happens here only)
-echo ""
-echo "  Running one-time setup (may prompt for Keychain access)..."
-if node "$DIR/grok-bot-mcp" setup 2>/dev/null; then
-  echo "  Credentials cached at ~/.gbm/config.json"
-else
-  echo "  Setup skipped — run manually later: node $DIR/grok-bot-mcp setup"
-fi
+# Create friendly command aliases (grok-bot, gbm, grok-bot-mcp)
+ln -sf "$DIR/grok-bot-mcp" "$DIR/grok-bot"
+ln -sf "$DIR/grok-bot-mcp" "$DIR/gbm"
 
-# Add to PATH
+# Add to PATH if needed
 case ":$PATH:" in
   *":$DIR:"*) ;;
   *)
@@ -62,7 +61,6 @@ SERVER_PATH="$DIR/grok-bot-mcp"
 NODE_BIN=$(which node 2>/dev/null || echo "node")
 
 # ── Configure MCP for each detected AI agent ─────────────────────────────
-
 CONFIGURED=""
 SKIPPED=""
 
@@ -72,7 +70,6 @@ add_to_config() {
     mkdir -p "$(dirname "$config_path")"
     echo '{"mcpServers":{}}' > "$config_path"
   fi
-  # Use node to safely merge JSON
   node -e "
     const fs = require('fs');
     const path = process.argv[1];
@@ -122,7 +119,7 @@ else
   SKIPPED="$SKIPPED  Windsurf (not installed)"
 fi
 
-# 4. VS Code (Copilot) — workspace-level, just print instructions
+# 4. VS Code (Copilot)
 if [ -d "$HOME/.vscode" ] || command -v code >/dev/null 2>&1; then
   CONFIGURED="$CONFIGURED  VS Code (add .vscode/mcp.json in workspace)"
 else
@@ -171,18 +168,20 @@ fi
 
 echo ""
 echo "  ┌─────────────────────────────────────────────────┐"
-echo "  │  grok-bot-mcp installed                         │"
+echo "  │  \033[32m✓ grok-bot installed successfully!\033[0m             │"
 echo "  ├─────────────────────────────────────────────────┤"
-echo "  │  Server: $DIR/grok-bot-mcp"
+echo "  │  Commands for Humans:                           │"
+echo "  │    \033[36mgrok-bot\033[0m          Check account usage & quota│"
+echo "  │    \033[36mgrok-bot login\033[0m    Connect account (browser)  │"
+echo "  │    \033[36mgrok-bot switch\033[0m   Switch active account      │"
+echo "  │    \033[36mgrok-bot list\033[0m     List connected accounts    │"
 echo "  ├─────────────────────────────────────────────────┤"
-echo "  │  Configured:"
+echo "  │  Configured AI Agents:                          │"
 [ -n "$CONFIGURED" ] && echo "$CONFIGURED" | while read -r line; do [ -n "$line" ] && echo "  │$line"; done
 echo "  ├─────────────────────────────────────────────────┤"
-echo "  │  Not detected:"
-[ -n "$SKIPPED" ] && echo "$SKIPPED" | while read -r line; do [ -n "$line" ] && echo "  │$line"; done
-echo "  ├─────────────────────────────────────────────────┤"
-echo "  │  Restart your AI agent to load the MCP server.  │"
+echo "  │  Restart your AI agent to load MCP tools.       │"
 echo "  └─────────────────────────────────────────────────┘"
 echo ""
-echo "  To run manually: node $DIR/grok-bot-mcp"
-echo ""
+
+# Run grok-bot for immediate feedback
+"$DIR/grok-bot" || true
