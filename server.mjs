@@ -4,7 +4,7 @@
 // For AI Agents: Full Model Context Protocol (MCP) server over stdio
 // Zero external dependencies. Node 18+.
 
-import { createHash, randomBytes, randomUUID, pbkdf2Sync, createDecipheriv } from "node:crypto";
+import { createHash, randomBytes, randomUUID, pbkdf2Sync, createDecipheriv, createCipheriv } from "node:crypto";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -270,6 +270,57 @@ function extractFromGrokBot() {
   return { accessToken, refreshToken, email };
 }
 
+export function syncDesktopAppAccount(targetName, acct) {
+  if (process.platform !== "darwin") return { updated: false, reason: "macOS only" };
+  if (!existsSync(GROKBOT_SECRETS)) return { updated: false, reason: "Grok Bot app not installed" };
+
+  try {
+    const kp = execSync('security find-generic-password -a "Grok Bot Key" -s "Grok Bot Safe Storage" -w', {
+      encoding: "utf8",
+      timeout: 5e3,
+      maxBuffer: 1e4
+    }).trim();
+    if (!kp) return { updated: false, reason: "Could not read keychain key" };
+
+    const dk = pbkdf2Sync(kp, "saltysalt", 1003, 16, "sha1");
+
+    function enc(text) {
+      const iv = Buffer.alloc(16, 0x20);
+      const cipher = createCipheriv("aes-128-cbc", dk, iv);
+      let buf = cipher.update(text, "utf8");
+      buf = Buffer.concat([buf, cipher.final()]);
+      return Buffer.concat([Buffer.from("v10", "utf8"), buf]).toString("base64");
+    }
+
+    const info = jwtInfo(acct.accessToken);
+    const sub = info.sub;
+    if (!sub) return { updated: false, reason: "No sub claim in access token" };
+
+    const accountHash = createHash("sha256").update(sub).digest("hex");
+    const d = JSON.parse(readFileSync(GROKBOT_SECRETS, "utf8"));
+    const acc = JSON.parse(d["cursor-accounts"] || "{\"active\":\"\",\"accounts\":{}}");
+
+    if (!acc.accounts) acc.accounts = {};
+
+    acc.accounts[accountHash] = {
+      "cursor-access-token": enc(acct.accessToken),
+      "cursor-account-profile": enc(JSON.stringify({
+        email: acct.email || targetName,
+        name: targetName,
+        avatar: ""
+      })),
+      "cursor-refresh-token": enc(acct.refreshToken || acct.accessToken)
+    };
+    acc.active = accountHash;
+
+    d["cursor-accounts"] = JSON.stringify(acc);
+    writeFileSync(GROKBOT_SECRETS, JSON.stringify(d, null, 2) + "\n");
+    return { updated: true, accountHash };
+  } catch (e) {
+    return { updated: false, reason: e.message };
+  }
+}
+
 // ── ConnectRPC calls (Cursor backend) ────────────────────────────────────
 export async function callDashboard(method, token) {
   const id = machineId(), cs = checksum(id);
@@ -525,7 +576,7 @@ const TOOLS = [
   },
   {
     name: "switch_account",
-    description: "Switch the active account for Cursor / Grok Bot. Subsequent tool calls and usage checks will use this active account.",
+    description: "Switch the active account for Cursor / Grok Bot across both CLI/MCP and the macOS Grok Bot desktop application. Next time you open the Grok Bot desktop app, it will launch directly into this account.",
     inputSchema: {
       type: "object",
       properties: {
@@ -729,7 +780,23 @@ async function handleTool(name, args) {
       s._active = match;
       for (const n of names) s[n].active = (n === match);
       saveStore(s);
-      return { content: [{ type: "text", text: JSON.stringify({ success: true, active: match, email: s[match].email || null }, null, 2) }] };
+
+      const desktop = syncDesktopAppAccount(match, s[match]);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            active: match,
+            email: s[match].email || null,
+            desktopAppSynced: desktop.updated,
+            desktopAppDetail: desktop.updated
+              ? `Next time you open Grok Bot app, it will launch on ${match}`
+              : desktop.reason
+          }, null, 2)
+        }]
+      };
     }
 
     case "list_databases": {
@@ -952,7 +1019,13 @@ export async function cmdSwitch(targetName) {
   s._active = match;
   for (const n of names) s[n].active = (n === match);
   saveStore(s);
-  console.log(`\n  \x1b[32m✓ Switched active account to:\x1b[0m \x1b[1m${match}\x1b[0m ${s[match].email ? `(${s[match].email})` : ""}\n`);
+
+  const desktop = syncDesktopAppAccount(match, s[match]);
+  const desktopNote = desktop.updated
+    ? " \x1b[36m(macOS Grok Bot desktop app synced)\x1b[0m"
+    : "";
+
+  console.log(`\n  \x1b[32m✓ Switched active account to:\x1b[0m \x1b[1m${match}\x1b[0m ${s[match].email ? `(${s[match].email})` : ""}${desktopNote}\n`);
 }
 
 export async function cmdList(asJson = false) {
