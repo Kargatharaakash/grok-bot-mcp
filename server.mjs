@@ -108,29 +108,73 @@ function getTokenFromGrokBot() {
   return extractJwt(decryptSafeStorage(enc));
 }
 
-function getTokenFromGbu() {
-  if (!existsSync(GBU_STORE)) throw new Error("No gbu accounts. Run: gbu add");
-  const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
-  const first = Object.values(s)[0];
-  if (!first?.accessToken) throw new Error("No token in gbu accounts");
-  return extractJwt(first.accessToken);
+function getAccountFromGbu(accountName = null) {
+  if (!existsSync(GBU_STORE)) return null;
+  try {
+    const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
+    const names = Object.keys(s).filter(k => !k.startsWith("_") && s[k]?.accessToken);
+    if (names.length === 0) return null;
+
+    let target = accountName;
+    if (!target) {
+      target = s._active || names.find(n => s[n].active) || names[0];
+    } else {
+      target = names.find(n => n.toLowerCase() === target.toLowerCase()) || target;
+    }
+    const acct = s[target];
+    if (!acct?.accessToken) return null;
+    return { name: target, ...acct };
+  } catch {
+    return null;
+  }
 }
 
-function getToken() {
+function getTokenFromGbu(accountName = null) {
+  const acct = getAccountFromGbu(accountName);
+  if (!acct?.accessToken) throw new Error("No token in gbu accounts");
+  return extractJwt(acct.accessToken);
+}
+
+function getToken(accountName = null) {
+  if (accountName && accountName !== "default" && accountName !== "active") {
+    const acct = getAccountFromGbu(accountName);
+    if (acct?.accessToken) return extractJwt(acct.accessToken);
+  }
+
   const envToken = process.env.GROKBOT_ACCESS_TOKEN?.trim();
   if (envToken) return extractJwt(envToken);
+
+  const gbuAcct = getAccountFromGbu();
+  if (gbuAcct?.accessToken) return extractJwt(gbuAcct.accessToken);
 
   const config = readGbmConfig();
   if (config?.accessToken) return extractJwt(config.accessToken);
 
-  try { return getTokenFromGbu(); } catch {}
-  throw new Error("No access token configured. Run: grok-bot-mcp setup");
+  throw new Error("No access token configured. Run: gbu add");
+}
+
+async function refreshGbuToken(refreshToken) {
+  const r = await fetch(`${BACKEND}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB",
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  });
+  if (!r.ok) throw new Error(`Refresh failed: ${r.status}`);
+  const j = await r.json();
+  return { accessToken: j.access_token, refreshToken: j.refresh_token ?? refreshToken };
 }
 
 async function runSetup() {
   const gateway = decryptGatewayFromKeychain();
   let accessToken;
-  try { accessToken = getTokenFromGrokBot(); } catch {}
+  try { accessToken = getTokenFromGbu(); } catch {}
+  if (!accessToken) {
+    try { accessToken = getTokenFromGrokBot(); } catch {}
+  }
 
   writeGbmConfig({
     version: 1,
@@ -156,7 +200,31 @@ async function callDashboard(method, token) {
     headers: {"Content-Type":"application/json",Authorization:`Bearer ${token}`,"x-cursor-checksum":cs,"x-cursor-client-type":"sand","x-cursor-client-version":"0.1.0","x-sand-box-namespace":"prod","x-ghost-mode":"true","x-request-id":randomUUID()},
     body: "{}"
   });
-  if (!r.ok) { const t = await r.text().catch(()=>""); throw new Error(`${method}: ${r.status} ${t}`); }
+  if (!r.ok) {
+    const t = await r.text().catch(()=>"");
+    // Attempt auto-refresh on 401 if gbu has a refresh token
+    if (r.status === 401 && existsSync(GBU_STORE)) {
+      try {
+        const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
+        const names = Object.keys(s).filter(k => !k.startsWith("_") && s[k]?.accessToken);
+        const matchKey = names.find(n => s[n].accessToken === token || extractJwt(s[n].accessToken) === token);
+        if (matchKey && s[matchKey].refreshToken) {
+          const fresh = await refreshGbuToken(s[matchKey].refreshToken);
+          s[matchKey].accessToken = fresh.accessToken;
+          s[matchKey].refreshToken = fresh.refreshToken;
+          writeFileSync(GBU_STORE, JSON.stringify(s, null, 2), { mode: 0o600 });
+          // Retry request with fresh token
+          const retry = await fetch(`${BACKEND}/aiserver.v1.DashboardService/${method}`, {
+            method: "POST",
+            headers: {"Content-Type":"application/json",Authorization:`Bearer ${fresh.accessToken}`,"x-cursor-checksum":checksum(machineId()),"x-cursor-client-type":"sand","x-cursor-client-version":"0.1.0","x-sand-box-namespace":"prod","x-ghost-mode":"true","x-request-id":randomUUID()},
+            body: "{}"
+          });
+          if (retry.ok) return retry.json();
+        }
+      } catch {}
+    }
+    throw new Error(`${method}: ${r.status} ${t}`);
+  }
   return r.json();
 }
 
@@ -334,8 +402,30 @@ const TOOLS = [
   // ── Usage ──
   {
     name: "check_usage",
-    description: "Check weekly usage and on-demand spend for your Cursor/Grok Bot account. Returns percentage used, reset time, and dollar amounts. No parameters needed.",
-    inputSchema: { type: "object", properties: {} }
+    description: "Check weekly usage and on-demand spend for your Cursor/Grok Bot account. Pass optional 'account' to check a specific account (e.g. 'company') or 'all' to check all accounts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: {
+          type: "string",
+          description: "Optional account name (e.g. 'main', 'company', or 'all'). Defaults to currently active account."
+        }
+      }
+    }
+  },
+  {
+    name: "switch_account",
+    description: "Switch the active Cursor / Grok Bot account in gbu. Future tool calls and commands will use this account.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: {
+          type: "string",
+          description: "Name of the account to switch to (e.g. 'main', 'company')."
+        }
+      },
+      required: ["account"]
+    }
   },
   // ── Database ──
   {
@@ -413,25 +503,68 @@ async function handleTool(name, args) {
     }
 
     case "check_usage": {
-      const token = getToken();
-      const [sand, period] = await Promise.allSettled([
-        callDashboard("GetSandUsageStatus", token),
-        callDashboard("GetCurrentPeriodUsage", token),
-      ]);
-      const ss = sand.status === "fulfilled" ? sand.value : null;
-      const pu = period.status === "fulfilled" ? period.value : null;
       const fmtC = c => c != null ? `$${(c/100).toFixed(2)}` : "N/A";
-      const fmtT = ms => ms ? new Date(ms).toLocaleString("en-US", {weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "N/A";
-      const spend = pu?.spendLimitUsage;
-      const summary = {
-        weeklyUsagePercent: ss?.usagePercent ?? null,
-        available: ss?.hasAvailableUsage ?? null,
-        resetsAt: ss?.nextResetTimestampUtc ?? null,
-        onDemandUsed: spend ? fmtC(spend.individualUsed ?? spend.totalSpend ?? 0) : null,
-        onDemandLimit: spend?.individualLimit != null ? fmtC(spend.individualLimit) : null,
-        billingCycleEnd: pu?.billingCycleEnd ?? null,
-      };
+      async function fetchSummaryForToken(tok) {
+        const [sand, period] = await Promise.allSettled([
+          callDashboard("GetSandUsageStatus", tok),
+          callDashboard("GetCurrentPeriodUsage", tok),
+        ]);
+        const ss = sand.status === "fulfilled" ? sand.value : null;
+        const pu = period.status === "fulfilled" ? period.value : null;
+        const spend = pu?.spendLimitUsage;
+        const planUsage = pu?.planUsage;
+        return {
+          weeklyUsagePercent: ss?.usagePercent ?? null,
+          available: ss?.hasAvailableUsage ?? null,
+          resetsAt: ss?.nextResetTimestampUtc ?? null,
+          planLabel: ss?.grokPlanLabel ?? null,
+          onDemandUsed: spend ? fmtC(spend.individualUsed ?? spend.totalSpend ?? 0) : null,
+          onDemandLimit: spend?.individualLimit != null ? fmtC(spend.individualLimit) : null,
+          billingCycleEnd: pu?.billingCycleEnd ?? null,
+          includedSpend: planUsage?.includedSpend != null ? fmtC(planUsage.includedSpend) : null,
+          includedLimit: planUsage?.limit != null ? fmtC(planUsage.limit) : null,
+          includedRemaining: planUsage?.remaining != null ? fmtC(planUsage.remaining) : null,
+        };
+      }
+
+      if (args.account === "all" && existsSync(GBU_STORE)) {
+        const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
+        const names = Object.keys(s).filter(k => !k.startsWith("_") && s[k]?.accessToken);
+        const activeName = s._active || names.find(n => s[n].active) || names[0];
+        const allUsage = {};
+        for (const n of names) {
+          try {
+            const summary = await fetchSummaryForToken(extractJwt(s[n].accessToken));
+            summary.email = s[n].email || null;
+            summary.active = (n === activeName);
+            allUsage[n] = summary;
+          } catch(e) {
+            allUsage[n] = { error: e.message };
+          }
+        }
+        return { content: [{ type: "text", text: JSON.stringify({ active: activeName, accounts: allUsage }, null, 2) }] };
+      }
+
+      const token = getToken(args.account);
+      const summary = await fetchSummaryForToken(token);
       return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+    }
+
+    case "switch_account": {
+      if (!existsSync(GBU_STORE)) throw new Error("No gbu accounts found. Run: gbu add");
+      const s = JSON.parse(readFileSync(GBU_STORE, "utf8"));
+      const names = Object.keys(s).filter(k => !k.startsWith("_") && s[k]?.accessToken);
+      const match = names.find(n => n.toLowerCase() === args.account.toLowerCase()) ||
+                    names.find(n => n.toLowerCase().startsWith(args.account.toLowerCase()));
+      if (!match) throw new Error(`Account "${args.account}" not found. Available: ${names.join(", ")}`);
+      s._active = match;
+      for (const n of names) s[n].active = (n === match);
+      writeFileSync(GBU_STORE, JSON.stringify(s, null, 2), { mode: 0o600 });
+      // Sync to gbm config
+      const cfg = readGbmConfig() || { version: 1 };
+      cfg.accessToken = extractJwt(s[match].accessToken);
+      writeGbmConfig(cfg);
+      return { content: [{ type: "text", text: JSON.stringify({ success: true, active: match, email: s[match].email || null }, null, 2) }] };
     }
 
     case "list_databases": {

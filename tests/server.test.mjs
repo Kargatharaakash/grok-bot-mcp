@@ -121,6 +121,14 @@ describe("grok-bot-mcp server", () => {
       const checkUsage = response.result.tools.find(t => t.name === "check_usage");
       assert.ok(!checkUsage.inputSchema.required || checkUsage.inputSchema.required.length === 0);
     });
+
+    test("switch_account requires account", async () => {
+      const response = await sendMcpRequest({
+        jsonrpc: "2.0", id: 81, method: "tools/list", params: {}
+      });
+      const switchAcct = response.result.tools.find(t => t.name === "switch_account");
+      assert.ok(switchAcct.inputSchema.required.includes("account"));
+    });
   });
 
   describe("tool call error handling", () => {
